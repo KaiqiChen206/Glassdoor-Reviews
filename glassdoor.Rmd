@@ -1,0 +1,600 @@
+---
+title: "Unstructured Data Analytics HW1"
+author: "Kaiqi Chen"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    
+fig_width: 8 
+fig_height: 8 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message = FALSE, warning=FALSE}
+library(tidyverse)
+library(lubridate)
+library(tm)
+library(tidytext)
+library(widyr)
+library(wordcloud2)
+library(textstem)
+library(ggwordcloud)
+library(lexicon)
+library(textdata)
+library(stringr)
+library(cld2)
+library(caTools)
+```
+
+```{r}
+load("./glassDoor.RData")
+```
+
+## Clean and Explore
+
+The dataset contains GlassDoor reviews for four organizations. Reviews are separated into pros, cons, and advice.  
+
+Problems with text:  
+organization name mixed in words, eg. ChORGAllenging  
+Non-english reviews  
+```{r}
+gdMixed <- glassDoor %>% 
+  filter((str_detect(pros, "[^\\s]+ORG[A-D][^\\s]+"))|
+           (str_detect(cons, "[^\\s]+ORG[A-D][^\\s]+"))|
+           (str_detect(advice, "[^\\s]+ORG[A-D][^\\s]+")))
+rmarkdown::paged_table(gdMixed)
+
+gdNonEng <- glassDoor %>% 
+  mutate(language = cld2::detect_language(pros)) %>% 
+  filter(language != "en") %>% 
+  dplyr::select(pros, cons, advice, language)
+rmarkdown::paged_table(gdNonEng)
+```
+
+They are only about 10% of the rows. Deleting them won't affect the result too much. The 36 rows of mixed word errors exhibits no pattern of the replaced letters. We may fuzzy join these words with a english dictionary and replace them. For the non-english reviews, not sure how well the translators perform in R, might just ignore them as well.
+
+```{r}
+gd2 <- glassDoor %>% 
+  filter(!(str_detect(pros, "[^\\s]+ORG[A-D][^\\s]+"))) %>% 
+  filter(!(str_detect(cons, "[^\\s]+ORG[A-D][^\\s]+"))) %>% 
+  filter(!(str_detect(advice, "[^\\s]+ORG[A-D][^\\s]+")) | is.na(advice)) %>% 
+  mutate(language = cld2::detect_language(pros)) %>% 
+  filter(language == "en") %>% 
+  mutate(organization = as.factor(organization),
+         pros = gsub("([a-z])([A-Z])", "\\1 \\2", pros),
+         cons = gsub("([a-z])([A-Z])", "\\1 \\2", cons),
+         advice = gsub("([a-z])([A-Z])", "\\1 \\2", advice),
+         rating = fct_relevel(rating, "5.0", "4.0", "3.0", "2.0")) 
+
+str(gd2)
+```
+
+## Visualization
+
+
+### Organization A
+```{r, message=FALSE, warning=FALSE}
+orga <- gd2 %>% 
+  filter(organization == "ORGA") %>% 
+  dplyr::select(pros, cons, advice) %>% 
+  pivot_longer(., cols = colnames(.), names_to = "type", values_to = "text") %>% 
+  mutate(type = as.factor(type)) %>% 
+  mutate(type = fct_relevel(type, "pros", "cons")) %>% 
+  drop_na(text) %>% 
+  mutate(text = str_replace_all(text, "ORGA", ""),
+         text = tolower(text),
+         text = lemmatize_strings(text),
+         text = stripWhitespace(text),
+         text = removeNumbers(text))  
+
+tokena <-  orga %>% 
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words) %>% 
+  left_join(parts_of_speech) %>% 
+  filter(pos == "Noun" & word != "company") %>% 
+  group_by(type) %>% 
+  count(word) %>% 
+  mutate(freq = n/sum(n)) %>% 
+  top_n(n = 20, wt = freq)
+
+tokena %>% 
+  ggplot(aes(label = word, size = freq,
+             color = type))+
+  geom_text_wordcloud_area()+
+  scale_size_area(max_size = 12)+
+  theme_minimal()+
+  scale_color_manual(values = c("pros"="#91cf60", "cons" = "#ef8a62", "advice"="#67a9cf"))+
+  facet_wrap(~type)+
+  labs(title = "Organization A")
+```
+
+
+### Organization B
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+orga <- gd2 %>% 
+  filter(organization == "ORGB") %>% 
+  dplyr::select(pros, cons, advice) %>% 
+  pivot_longer(., cols = colnames(.), names_to = "type", values_to = "text") %>% 
+  mutate(type = as.factor(type)) %>% 
+  mutate(type = fct_relevel(type, "pros", "cons")) %>% 
+  drop_na(text) %>% 
+  mutate(text = str_replace_all(text, "ORGB", ""),
+         text = tolower(text),
+         text = lemmatize_strings(text),
+         text = stripWhitespace(text),
+         text = removeNumbers(text))  
+
+tokena <-  orga %>% 
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words) %>% 
+  left_join(parts_of_speech) %>% 
+  filter(pos == "Noun" & word != "company") %>% 
+  group_by(type) %>% 
+  count(word) %>% 
+  mutate(freq = n/sum(n)) %>% 
+  top_n(n = 20, wt = freq)
+
+tokena %>% 
+  ggplot(aes(label = word, size = freq,
+             color = type))+
+  geom_text_wordcloud_area()+
+  scale_size_area(max_size = 12)+
+  theme_minimal()+
+  scale_color_manual(values = c("pros"="#91cf60", "cons" = "#ef8a62", "advice"="#67a9cf"))+
+  facet_wrap(~type)+
+  labs(title = "Organization B")
+```
+
+### Organization C
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+orga <- gd2 %>% 
+  filter(organization == "ORGC") %>% 
+  dplyr::select(pros, cons, advice) %>% 
+  pivot_longer(., cols = colnames(.), names_to = "type", values_to = "text") %>% 
+  mutate(type = as.factor(type)) %>% 
+  mutate(type = fct_relevel(type, "pros", "cons")) %>% 
+  drop_na(text) %>% 
+  mutate(text = str_replace_all(text, "ORGC", ""),
+         text = tolower(text),
+         text = lemmatize_strings(text),
+         text = stripWhitespace(text),
+         text = removeNumbers(text))  
+
+tokena <-  orga %>% 
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words) %>% 
+  left_join(parts_of_speech) %>% 
+  filter(pos == "Noun" & word != "company") %>% 
+  group_by(type) %>% 
+  count(word) %>% 
+  mutate(freq = n/sum(n)) %>% 
+  top_n(n = 20, wt = freq)
+
+tokena %>% 
+  ggplot(aes(label = word, size = freq,
+             color = type))+
+  geom_text_wordcloud_area()+
+  scale_size_area(max_size = 12)+
+  theme_minimal()+
+  scale_color_manual(values = c("pros"="#91cf60", "cons" = "#ef8a62", "advice"="#67a9cf"))+
+  facet_wrap(~type)+
+  labs(title = "Organization C")
+```
+
+### Organization D
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+orga <- gd2 %>% 
+  filter(organization == "ORGD") %>% 
+  dplyr::select(pros, cons, advice) %>% 
+  pivot_longer(., cols = colnames(.), names_to = "type", values_to = "text") %>% 
+  mutate(type = as.factor(type)) %>% 
+  mutate(type = fct_relevel(type, "pros", "cons")) %>% 
+  drop_na(text) %>% 
+  mutate(text = str_replace_all(text, "ORGD", ""),
+         text = tolower(text),
+         text = lemmatize_strings(text),
+         text = stripWhitespace(text),
+         text = removeNumbers(text))  
+
+tokena <-  orga %>% 
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words) %>% 
+  left_join(parts_of_speech) %>% 
+  filter(pos == "Noun" & word != "company") %>% 
+  group_by(type) %>% 
+  count(word) %>% 
+  mutate(freq = n/sum(n)) %>% 
+  top_n(n = 20, wt = freq)
+
+tokena %>% 
+  ggplot(aes(label = word, size = freq,
+             color = type))+
+  geom_text_wordcloud_area()+
+  scale_size_area(max_size = 11)+
+  theme_minimal()+
+  scale_color_manual(values = c("pros"="#91cf60", "cons" = "#ef8a62", "advice"="#67a9cf"))+
+  facet_wrap(~type)+
+  labs(title = "Organization D")
+  
+```
+
+It seems words such as "people", "management", "employee", "pay", appears in all pros, cons, and advice in all four companies' reviews. How come people love and hate the same aspect about the same company? We need to take a deeper dive in the future.
+
+
+## Sentiment Analyses
+
+We are going to do sentiment analyses on Pros, Cons, and Advice separately. Using functions from `sentimentr`, and applying *jocker* polarity table (ranges from -1 to 1) and *hash_valence_shifters*, we can get the sentiment for each reviews. Then we can aggregate the sentiments by rating or company.
+
+
+### Sentiment of Pros
+```{r, message=FALSE, warning=FALSE}
+library(sentimentr)
+library(lexicon)
+library(magrittr)
+prosDF <- gd2 %>% 
+  dplyr::select(pros, rating, organization) %>% 
+  mutate(pros = str_replace_all(pros, "ORG[A-D]", ""),
+         pros = str_replace_all(pros, "[\\.\\!\\?]", ""),
+         pros = tolower(pros),
+         pros = lemmatize_strings(pros),
+         pros = stripWhitespace(pros),
+         pros = removeNumbers(pros))  
+
+proSenti = sentiment(get_sentences(prosDF), 
+          polarity_dt = lexicon::hash_sentiment_jockers,
+          valence_shifters_dt = lexicon::hash_valence_shifters)
+
+## aggregate by company
+proSenti %>% 
+  group_by(organization) %>% 
+  summarize(meanSentiment = mean(sentiment))
+```
+
+The sentiments in *Pros* reviews for each company are not too different with ORGD taking a slight lead. 
+
+```{r}
+## aggregate sentiment by rating
+proSenti %>% 
+  group_by(rating) %>% 
+  summarize(meanSentiment = mean(sentiment))
+```
+
+It is within expectation. Higher rated reviews have more positive words.
+
+```{r}
+## aggregate by both company and rating
+proSenti %>% 
+  group_by(organization, rating) %>% 
+  summarize(meanSentiment = mean(sentiment)) %>% 
+  ggplot(aes(x = rating, y = meanSentiment, fill = organization))+
+  geom_col()+
+  facet_wrap(~organization)+
+  geom_text(aes(label = round(meanSentiment,2)), vjust = -0.2)+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(),
+        axis.text.y = element_blank(),
+        legend.position = "none")
+```
+
+Within companies, we can still observe that sentiment goes down as rating decreases.
+
+### Sentiment of Cons
+
+Using the same method on *Cons*
+```{r, echo=FALSE}
+consDF <- gd2 %>% 
+  dplyr::select(cons, rating, organization) %>% 
+  mutate(cons = str_replace_all(cons, "ORG[A-D]", ""),
+         cons = str_replace_all(cons, "[\\.\\!\\?]", ""),
+         cons = tolower(cons),
+         cons = lemmatize_strings(cons),
+         cons = stripWhitespace(cons),
+         cons = removeNumbers(cons))  
+
+consenti = sentiment(get_sentences(consDF), 
+          polarity_dt = lexicon::hash_sentiment_jockers,
+          valence_shifters_dt = lexicon::hash_valence_shifters)
+
+## by organization
+consenti %>% 
+  group_by(organization) %>% 
+  summarize(meanSentiment = mean(sentiment))
+
+## by rating
+consenti %>% 
+  group_by(rating) %>% 
+  summarize(meanSentiment = mean(sentiment))
+  
+##by both
+consenti %>% 
+  group_by(organization, rating) %>% 
+  summarize(meanSentiment = mean(sentiment)) %>% 
+  ggplot(aes(x = rating, y = meanSentiment, fill = organization))+
+  geom_col()+
+  facet_wrap(~organization)+
+  geom_text(aes(label = round(meanSentiment,2)), vjust = -0.2)+
+  geom_hline(yintercept = 0)+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(),
+        axis.text.y = element_blank(),
+        legend.position = "none")  
+```
+
+Of course the sentiment scores for *Cons* are much lower, sometime even negative. But they have similar pattern as *Pros*. And range of the scores is much smaller than *Pros*. People left more positive words for ORGD again in *Cons*.
+
+### Sentiment of Advice
+```{r, echo=FALSE}
+adviceDF <- gd2 %>% 
+  dplyr::select(advice, rating, organization) %>% 
+  mutate(advice = str_replace_all(advice, "ORG[A-D]", ""),
+         advice = str_replace_all(advice, "[\\.\\!\\?]", ""),
+         advice = tolower(advice),
+         advice = lemmatize_strings(advice),
+         advice = stripWhitespace(advice),
+         advice = removeNumbers(advice))  
+
+adviceSenti = sentiment(get_sentences(adviceDF), 
+          polarity_dt = lexicon::hash_sentiment_jockers,
+          valence_shifters_dt = lexicon::hash_valence_shifters)
+
+## by organization
+adviceSenti %>% 
+  group_by(organization) %>% 
+  summarize(meanSentiment = mean(sentiment))
+
+## by rating
+adviceSenti %>% 
+  group_by(rating) %>% 
+  summarize(meanSentiment = mean(sentiment))
+  
+##by both
+adviceSenti %>% 
+  group_by(organization, rating) %>% 
+  summarize(meanSentiment = mean(sentiment)) %>% 
+  ggplot(aes(x = rating, y = meanSentiment, fill = organization))+
+  geom_col()+
+  facet_wrap(~organization)+
+  geom_text(aes(label = round(meanSentiment,2)), vjust = -0.2)+
+  geom_hline(yintercept = 0)+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(),
+        axis.text.y = element_blank(),
+        legend.position = "none")  
+```
+
+*Advice* is more positive than *Cons*. However, the sentiment score do not decrease as rating decrease when rating >= 2. Again, ORGD reveives more positive words on *Advice*. It seems people speak positively in all three kinds of reviews in ORGD.
+
+## Topic Models
+
+```{r}
+gd3 <- gd2 %>% 
+  dplyr::select(pros, cons, advice, rating, organization) %>% 
+  drop_na(c(pros, cons, advice)) %>% 
+  mutate(text = str_c(pros, cons, advice, sep = " ")) %>% 
+  dplyr::select(rating, organization, text)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(stm)
+
+set.seed(1234)
+
+holdoutRows = sample(1:nrow(gd3), 100, replace = FALSE)
+
+gdText = textProcessor(documents = gd3$text[-c(holdoutRows)], 
+                          metadata = gd3[-c(holdoutRows), ], 
+                          stem = FALSE)
+```
+
+```{r}
+gdPrep = prepDocuments(documents = gdText$documents, 
+                               vocab = gdText$vocab,
+                               meta = gdText$meta)
+```
+
+```{r, eval=FALSE}
+kTest = searchK(documents = gdPrep$documents, 
+             vocab = gdPrep$vocab, 
+             K = c(3, 4, 5, 10, 20), verbose = FALSE)
+
+# png(file = "./ktest1new.png", width = 800, height = 600)
+# plot(kTest)
+# dev.off()
+```
+
+![](G:/My Drive/Mod3/Unstructure/HW2/ktest1new.png)
+
+Looks like 4 is a reasonable number of topics.  
+
+Now let's look at expected topic proportions.  
+
+```{r}
+topics4 = stm(documents = gdPrep$documents, 
+             vocab = gdPrep$vocab, seed = 1001,
+             K = 4, verbose = FALSE)
+
+
+plot(topics4)
+```
+
+
+```{r}
+labelTopics(topics4)
+```
+
+From highest prob and FREX words, we can see the difference between the 5 topics. It seems topic 1 is compliment of the work at the company. Topic 2 is about pay and benefits. Topic 3 is about the cons of the company. Topic 4 is about professional experience.
+
+```{r}
+head(topics4$theta, 15)
+```
+
+We can see some documents have a more focused topic, and some documents span different topics.    
+  
+Let's use the model to classify heldout documents  
+
+```{r}
+newgdText = textProcessor(documents = gd3$text[holdoutRows], 
+                          metadata = gd3[holdoutRows, ], 
+                          stem = FALSE)
+```
+
+```{r}
+newgdCorp = alignCorpus(new = newgdText, old.vocab = topics4$vocab)
+newgdFitted = fitNewDocuments(model = topics4, documents = newgdCorp$documents, 
+                newData = newgdCorp$meta, origData = gdPrep$meta)
+
+```
+
+```{r}
+head(newgdFitted$theta, 15)
+```
+
+
+## Predict ratings with text feature
+
+Let's see if any topic proportion is related to rating.  
+
+```{r}
+gd3 <- gd3 %>% 
+  mutate(rating = as.numeric(as.character(rating)))
+predictorText = textProcessor(documents = gd3$text, 
+                          metadata = gd3, 
+                          stem = FALSE)
+gdPrep = prepDocuments(documents = predictorText$documents, 
+                               vocab = predictorText$vocab,
+                               meta = predictorText$meta)
+topicPredictor = stm(documents = gdPrep$documents,
+             vocab = gdPrep$vocab, prevalence = ~ rating,
+             data = gdPrep$meta, K = 4, verbose = FALSE)
+
+ratingEffect = estimateEffect(1:4 ~ rating, stmobj = topicPredictor,
+               metadata = gdPrep$meta)
+
+summary(ratingEffect, topics = c(1:4))
+```
+
+
+```{r}
+plot.estimateEffect(ratingEffect, "rating", method = "continuous",
+                    model = topicPredictor, topics = 1, labeltype = "frex")
+plot.estimateEffect(ratingEffect, "rating", method = "continuous",
+                    model = topicPredictor, topics = 2, labeltype = "frex")
+plot.estimateEffect(ratingEffect, "rating", method = "continuous",
+                    model = topicPredictor, topics = 3, labeltype = "frex")
+plot.estimateEffect(ratingEffect, "rating", method = "continuous",
+                    model = topicPredictor, topics = 4, labeltype = "frex")
+```
+
+Looks like ratings are associated with topic proportions. Except topic 1 not so significant.
+
+
+```{r}
+thetas=topicPredictor$theta
+```
+
+It seems that these topic are related to rating. On the other hand, We may use them to predict ratings.  
+  
+We are going to use sentiments and topic thetas to predict ratings.  
+```{r}
+proSenti <- proSenti %>% 
+  rename(c("proSentiment"="sentiment"))
+
+conSenti <- consenti %>% 
+  rename(c("conSentiment"="sentiment"))
+
+adviceSenti <- adviceSenti %>% 
+  rename(c("adviceSentiment"="sentiment"))
+
+gd4 <- gd2 %>% 
+  mutate(proSentiment = proSenti$proSentiment,
+         conSentiment = conSenti$conSentiment,
+         adviceSentiment = adviceSenti$adviceSentiment) %>% 
+  drop_na(c(pros, cons, advice)) %>% 
+  mutate(topic1theta = thetas[,1],
+         topic2theta = thetas[,2],
+         topic3theta = thetas[,3],
+         topic4theta = thetas[,4])
+```
+
+Split into training and testing sets  
+```{r}
+gd5 <- gd4 %>% 
+  dplyr::select(rating, proSentiment, conSentiment, adviceSentiment, 
+         topic1theta, topic2theta, topic3theta, topic4theta, organization) %>% 
+  mutate(rating = as.numeric(as.character(rating)))
+sample_set <- gd5 %>% 
+  pull(.) %>% 
+  sample.split(SplitRatio = .7)
+
+gdTrain <- subset(gd5, sample_set == TRUE)
+gdTest <- subset(gd5, sample_set == FALSE)
+```
+
+Let's try linear model first  
+```{r}
+lmod <- lm(rating~proSentiment+ conSentiment+ adviceSentiment+ 
+         topic1theta+ topic2theta+ topic3theta, data=gd5)
+summary(lmod)
+```
+
+Remove insignificant variables.
+
+```{r}
+lmod2 <- lm(rating~proSentiment+topic1theta+topic2theta+topic3theta, data=gd5)
+summary(lmod2)
+```
+
+Adj. R-squared is 0.6203, not too bad.  
+
+```{r}
+lmPred <- predict(lmod2, gdTest)
+lmPred_round <- ifelse(lmPred <=1.0, 1.0, lmPred)
+lmPred_round <- ifelse(lmPred_round >=5.0, 5.0, lmPred_round)
+lmPred_round <- round(lmPred_round)
+table(lmPred_round, gdTest$rating)
+mean(as.character(lmPred_round) != as.character(gdTest$rating))
+```
+
+There are a lot of wrong prediction in the test data. But the predictions are not too far off. Most predictions are within 1.0 points range around the actuals. A 59% of the test data is missclassified.  
+  
+Multinomial logistic regression  
+  
+Since the ratings are discrete, let's see how a multinomial logistic regression performs.
+
+```{r}
+gd5_factor <- gd4 %>% 
+  dplyr::select(rating, proSentiment, conSentiment, adviceSentiment, 
+         topic1theta, topic2theta, topic3theta, topic4theta, organization)
+
+set.seed(1234)
+sample_set <- gd5_factor %>% 
+  pull(.) %>% 
+  sample.split(SplitRatio = .7)
+
+gdTrain <- subset(gd5_factor, sample_set == TRUE)
+gdTest <- subset(gd5_factor, sample_set == FALSE)
+
+library(MASS)
+ordModel <- polr(rating~proSentiment+topic1theta+topic2theta+topic3theta, data=gd5_factor, Hess = TRUE)
+summary (ordModel) 
+```
+
+```{r}
+predicted_scores <- predict (ordModel, gdTest, "probs") 
+
+predicted_class <- predict (ordModel, gdTest)
+
+table(predicted_class, gdTest$rating)
+
+mean(as.character(predicted_class) != as.character(gdTest$rating))
+```
+
+It improved a litte with a missclassification rate of 48%.  
+  
+There is still a lot of room to improve the model to predict the rating. Here, we are only using text features such as sentiment and topic thetas. We can add other rating in the model or add some interactions with organization. We can try mixed model, too. Using more complexed model may improve the performance.
